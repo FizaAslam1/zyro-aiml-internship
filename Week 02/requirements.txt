@@ -1,5 +1,0 @@
-streamlit
-PyMuPDF
-Pillow
-numpy
-easyocr
