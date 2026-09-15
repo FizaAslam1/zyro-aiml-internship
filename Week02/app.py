@@ -22,7 +22,7 @@ from text_utils import clean_text, is_text_too_short
 from ocr_preprocessing import preprocess_for_ocr, needs_preprocessing
 from extraction import extract_fields, NOT_FOUND
 
-MODEL_DIR = "models"
+MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 
 
 @st.cache_resource
@@ -268,7 +268,7 @@ with st.sidebar:
             "for ML-based classification with confidence scores."
         )
     st.divider()
-    st.caption("Zyroo Internship Program • ")
+    st.caption("Zyroo Internship Program • Week 3 • Task 02")
 
 # ---- header ----
 st.title("📄 AI Document Intelligence & Workflow Platform")
