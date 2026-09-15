@@ -1,361 +1,97 @@
-# 📄 AI Document Intelligence & Workflow Platform
+# AI Document Intelligence & Workflow Platform — Week 3
 
-**Zyroo AI/ML Internship Program • Week 2 • Task 01**
+**Zyroo AI/ML Internship — Task 02: Improve Document Understanding**
 
-An intelligent Streamlit application that processes documents (PDFs and images) to automatically identify document types, extract key information, and present results in an intuitive interface. Built with cutting-edge Python libraries for document processing and OCR.
+This builds on the Week 2 MVP (upload → read text/OCR → identify type →
+extract fields → show result) by making every stage more robust and adding
+a trained ML classifier with an evaluated comparison.
 
----
+## What changed from Week 2
 
-## 🎯 Project Overview
+| Area | Week 2 | Week 3 |
+|---|---|---|
+| Dataset | None (no training data) | `dataset/generate_dataset.py` builds a labeled, balanced dataset (60 Invoice / 60 Resume / 60 Other) — see note below |
+| Text cleaning | None — raw extracted text used directly | `text_utils.py`: strips control chars, collapses repeated whitespace/blank lines, trims lines, checks for empty/too-short text |
+| OCR | Single OCR pass, no preprocessing | `ocr_preprocessing.py`: if the first OCR pass returns too little text, the page/image is resized, grayscaled, auto-contrasted, denoised (median filter) and re-thresholded, then OCR'd again; the better result is kept |
+| Classification | Keyword counting only | `train_classifier.py`: TF‑IDF features + 3 models trained and compared (Logistic Regression, Linear SVM, Naive Bayes); best one picked **by F1‑score**, not by "which is fancier". Rule-based Week 2 logic kept as a baseline and as a **fallback** if no trained model is found |
+| Evaluation | None | Accuracy, macro precision/recall/F1, per-class report, and a confusion matrix image — see `models/model_comparison.txt` and `models/confusion_matrix.png` |
+| Field extraction | Basic regex, some false matches (e.g. "Total" matched inside "Subtotal") | `extraction.py`: fixed the Subtotal/Total bug, added more date/number formats, resume "Name" no longer grabs a section header by mistake, "Skills" stops at the next section instead of eating the whole document |
+| Missing fields | Returned the string `"Not found"` as a plain value | Every field now returns `{value, found}`; the UI clearly highlights missing fields and never crashes when a field is absent |
+| Confidence | Not shown | Shown next to the document type (e.g. `Invoice \| Confidence: 91%`) **only** when the model genuinely supports it (Logistic Regression / Naive Bayes via `predict_proba`); no number is invented for Linear SVM |
 
-This application streamlines document processing workflows by leveraging computer vision and natural language processing techniques. Users can upload invoices or resumes in various formats, and the system automatically:
-
-1. **Reads & Extracts** text using PyMuPDF or OCR
-2. **Classifies** document type using keyword-based intelligence
-3. **Extracts** structured data from identified documents
-4. **Presents** results in an interactive web interface
-
-### Supported Document Types
-
-- **Invoices** → Invoice Number, Date, Company Name, Total Amount
-- **Resumes** → Name, Email, Phone, Skills
-- **Other Documents** → General text extraction
-
----
-
-## ✨ Key Features
-
-✅ **Multi-format Support** — Accepts PDF, JPG/JPEG, PNG files  
-✅ **Intelligent Text Extraction** — PyMuPDF for digital PDFs, OCR fallback for scanned documents  
-✅ **Smart Classification** — Keyword-based document type detection  
-✅ **Structured Field Extraction** — Regex patterns for targeted information retrieval  
-✅ **User-Friendly Interface** — Clean Streamlit UI with real-time processing  
-✅ **Robust Error Handling** — Graceful fallbacks and informative error messages  
-
----
-
-## 🚀 Live Demo
-
-**Try the application now:** [https://zyro-aiml-internship-6evjxpnz2rtel6t5cn753h.streamlit.app/](https://zyro-aiml-internship-6evjxpnz2rtel6t5cn753h.streamlit.app/)
-
-No installation required — test with sample documents directly in your browser!
-
----
-
-## 📦 Project Structure
+## Project structure
 
 ```
-Week02/
-├── app.py                  # Main Streamlit application
-├── requirements.txt        # Python dependencies
-└── Readme.md              # This file
+zyroo_week3/
+├── app.py                     # Streamlit app (run this)
+├── train_classifier.py        # Train + evaluate + compare models (run this first)
+├── text_utils.py               # Text cleaning shared by training & app
+├── ocr_preprocessing.py        # Image preprocessing for difficult OCR cases
+├── extraction.py                # Regex-based field extraction (Invoice/Resume)
+├── dataset/
+│   ├── generate_dataset.py     # Builds dataset/documents.csv
+│   └── documents.csv           # Generated training data (180 rows)
+└── models/                      # Created by train_classifier.py
+    ├── vectorizer.joblib
+    ├── classifier.joblib
+    ├── labels_order.joblib
+    ├── best_model_name.joblib
+    ├── model_comparison.txt     # Accuracy/precision/recall/F1 for all 3 models
+    └── confusion_matrix.png
 ```
 
----
-
-## 🛠️ Technology Stack
-
-| Component | Technology |
-|-----------|-----------|
-| **Framework** | Streamlit |
-| **PDF Processing** | PyMuPDF (fitz) |
-| **OCR Engine** | EasyOCR |
-| **Image Processing** | Pillow, NumPy |
-| **Pattern Matching** | Regular Expressions |
-| **Language** | Python 3.8+ |
-
----
-
-## 📋 Workflow Architecture
-
-```
-┌─────────────────┐
-│  Upload Document │
-└────────┬────────┘
-         │
-         ▼
-┌──────────────────────┐
-│ Extract Text/OCR     │
-│ (PyMuPDF / EasyOCR)  │
-└────────┬─────────────┘
-         │
-         ▼
-┌──────────────────────┐
-│ Detect Document Type │
-│ (Keyword Analysis)   │
-└────────┬─────────────┘
-         │
-         ▼
-┌──────────────────────┐
-│ Extract Key Fields   │
-│ (Regex Patterns)     │
-└────────┬─────────────┘
-         │
-         ▼
-┌──────────────────────┐
-│ Display Results      │
-│ (Streamlit UI)       │
-└──────────────────────┘
-```
-
----
-
-## ⚙️ Installation & Setup
-
-### Prerequisites
-
-- Python 3.8 or higher
-- pip package manager
-- Tesseract OCR (system dependency)
-
-### Step 1: Clone the Repository
+## How to run
 
 ```bash
-git clone https://github.com/FizaAslam1/zyro-aiml-internship.git
-cd zyro-aiml-internship/Week02
-```
+pip install streamlit pymupdf easyocr pillow numpy scikit-learn matplotlib joblib
 
-### Step 2: Create Virtual Environment
+# 1. (Re)generate the dataset (optional — one is already included)
+python dataset/generate_dataset.py
 
-```bash
-# Create environment
-python -m venv venv
+# 2. Train and evaluate the classifier (required before first run of the app)
+python train_classifier.py
 
-# Activate environment
-# On Windows:
-venv\Scripts\activate
-
-# On macOS/Linux:
-source venv/bin/activate
-```
-
-### Step 3: Install Python Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### Step 4: Install Tesseract OCR
-
-**Windows:**
-- Download installer: [tesseract-ocr](https://github.com/UB-Mannheim/tesseract/wiki)
-- Run installer and note installation path
-- (Optional) Add to `app.py`: `pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'`
-
-**macOS:**
-```bash
-brew install tesseract
-```
-
-**Linux (Debian/Ubuntu):**
-```bash
-sudo apt-get update
-sudo apt-get install tesseract-ocr
-```
-
-### Step 5: Run the Application
-
-```bash
+# 3. Launch the app
 streamlit run app.py
 ```
 
-The app will open at `http://localhost:8501`
+## About the dataset
 
----
+Real scanned invoices/resumes weren't available to collect during this
+task, so `dataset/generate_dataset.py` **synthesizes** realistic text
+samples (varied field labels/order, light OCR-style noise, and a few
+deliberately tricky "Other" documents like purchase orders and quotations
+that share vocabulary with invoices, so the classifier is actually
+tested). **This is a starting point** — for a stronger real-world model,
+replace/extend `dataset/documents.csv` with real collected examples per
+the task's Step 1.
 
-## 🧪 Testing & Validation
+## Evaluation results (current run)
 
-### Test Cases
+See `models/model_comparison.txt` for the full report. Summary: all three
+models (Logistic Regression, Linear SVM, Naive Bayes) reached high
+accuracy on the held-out test split, and **Logistic Regression** was
+selected as it gave the best macro F1-score. The confusion matrix
+(`models/confusion_matrix.png`) shows predictions vs. true labels for the
+selected model. Because the three document classes are quite distinct in
+vocabulary, scores are high on this synthetic set — testing on real,
+messier documents (Step 11) is expected to reveal more mistakes, which
+is exactly what that step is for.
 
-| Test Case | Input | Expected Output |
-|-----------|-------|-----------------|
-| **Digital Invoice (PDF)** | Invoice PDF with text layer | Type: Invoice, Fields extracted correctly |
-| **Scanned Invoice (PDF)** | Scanned invoice image as PDF | Type: Invoice, OCR fallback used, Fields extracted |
-| **Resume (PDF)** | Resume PDF | Type: Resume, Name/Email/Phone/Skills extracted |
-| **Resume Image (JPG/PNG)** | Resume image file | Type: Resume, OCR used, fields extracted |
-| **Unknown Document** | Unclassified document | Type: Other, Full text displayed |
+## Manual testing notes (Step 11)
 
-### How to Test
+Record results here as you test with real documents, e.g.:
 
-1. Prepare sample documents (invoices and resumes)
-2. Upload one at a time using the web interface
-3. Verify:
-   - ✓ Text extracted correctly
-   - ✓ Document type identified accurately
-   - ✓ Key fields extracted properly
-   - ✓ Missing fields show "Not found" (no crashes)
-   - ✓ Full text viewable in expandable section
+| Document | Expected Type | Predicted Type | Fields Missing | Notes |
+|---|---|---|---|---|
+| sample_invoice_1.pdf | Invoice | | | |
+| scanned_resume.jpg | Resume | | | |
+| random_letter.pdf | Other | | | |
 
----
+## Known limitations / next steps
 
-## 🌐 Deployment Options
-
-### Option 1: Streamlit Community Cloud (Recommended)
-
-1. Push code to GitHub
-2. Visit [Streamlit Cloud](https://streamlit.io/cloud)
-3. Click "New app" → Select repository
-4. Add `packages.txt` with `tesseract-ocr` for server-side OCR:
-
-```
-tesseract-ocr
-```
-
-5. Deploy!
-
-### Option 2: Hugging Face Spaces
-
-1. Create Space on [Hugging Face](https://huggingface.co/spaces)
-2. Select Streamlit as SDK
-3. Upload files and `packages.txt`
-4. Automatic deployment
-
-### Option 3: Self-Hosted
-
-```bash
-# Install Nginx/Apache for reverse proxy
-# Run: streamlit run app.py --server.port 8501
-# Configure reverse proxy to forward traffic
-```
-
----
-
-## 📊 Performance Characteristics
-
-| Operation | Avg Time | Notes |
-|-----------|----------|-------|
-| Text extraction (PDF) | 1-3s | Depends on page count |
-| OCR (full page) | 10-30s | GPU acceleration recommended |
-| Type detection | <100ms | Lightweight keyword analysis |
-| Field extraction | <500ms | Regex-based processing |
-
----
-
-## 🔍 Advanced Features & Extensibility
-
-### Future Enhancements
-
-- [ ] Machine Learning-based document classification (SVM/Neural Networks)
-- [ ] Support for additional document types (Tax forms, Receipts, IDs)
-- [ ] Advanced field extraction using Named Entity Recognition (NER)
-- [ ] Batch processing for multiple documents
-- [ ] Export results to CSV/JSON
-- [ ] Integration with cloud storage (S3, Google Drive)
-
-### Customization Guide
-
-**Add New Document Type:**
-```python
-# In extract_fields() function:
-elif doc_type == "CustomType":
-    return extract_custom_fields(text)
-```
-
-**Improve Classification:**
-Enhance `detect_document_type()` with ML models:
-```python
-from sklearn.naive_bayes import MultinomialNB
-# Train and use classifier instead of keyword matching
-```
-
----
-
-## 🐛 Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| "Tesseract not found" | Install Tesseract and set path in app.py |
-| "No text extracted" | Ensure PDF isn't corrupted; check file format |
-| "Slow OCR processing" | Enable GPU in EasyOCR or use smaller images |
-| "Port 8501 already in use" | Run `streamlit run app.py --server.port 8502` |
-| "Module not found errors" | Verify all requirements installed: `pip install -r requirements.txt` |
-
----
-
-## 📚 Dependencies
-
-| Package | Version | Purpose |
-|---------|---------|---------|
-| streamlit | Latest | Web framework |
-| PyMuPDF (fitz) | Latest | PDF text extraction |
-| easyocr | Latest | OCR engine |
-| Pillow (PIL) | Latest | Image processing |
-| numpy | Latest | Array operations |
-
----
-
-## 📖 Code Structure
-
-### Main Functions
-
-1. **Text Extraction Module**
-   - `extract_text_from_pdf()` — Digital PDF processing
-   - `extract_text_with_ocr_from_pdf()` — Scanned PDF handling
-   - `extract_text_from_image()` — Image OCR
-
-2. **Classification Module**
-   - `detect_document_type()` — Keyword-based classification
-
-3. **Field Extraction Module**
-   - `extract_invoice_fields()` — Invoice-specific patterns
-   - `extract_resume_fields()` — Resume-specific patterns
-
-4. **UI Module**
-   - Streamlit page config
-   - File uploader
-   - Results display
-
----
-
-## 📝 Sample Output
-
-```
-Uploaded: sample_invoice.pdf | Type: PDF
-
-Text extracted using: PyMuPDF (text layer)
-
-📌 Document Type: Invoice
-
-🔎 Extracted Fields
-Invoice Number: INV-2024-001
-Date: 01/15/2024
-Company Name: Acme Corporation
-Total Amount: $5,299.99
-
-📃 View Full Extracted Text
-[Expandable section with complete extracted text]
-```
-
----
-
-## 📧 Contact & Links
-
-- **GitHub Repository:** [zyro-aiml-internship](https://github.com/FizaAslam1/zyro-aiml-internship)
-- **Live Demo:** [Streamlit App](https://zyro-aiml-internship-6evjxpnz2rtel6t5cn753h.streamlit.app/)
-- **Developer:** [Fiza Aslam](https://github.com/FizaAslam1)
-
----
-
-## 👩‍💻 Author
-
-**Fiza Aslam**  
-AI/ML Engineer | Data Scientist  
-*Zyroo AI/ML Internship Program — Week 2*
-
----
-
-## 📄 License
-
-This project is part of the **Zyroo AI/ML Internship Program**.
-
----
-
-## 🙏 Acknowledgments
-
-- Zyroo Internship Program for the opportunity
-- Open-source communities: Streamlit, PyMuPDF, EasyOCR
-- Python ecosystem for excellent ML/AI libraries
-
----
-
-**Last Updated:** 2024 | **Status:** ✅ Production Ready
+- Classifier trained on synthetic data — accuracy on real-world scans may
+  be lower until real examples are added.
+- OCR preprocessing is intentionally simple (Pillow-only); a production
+  system might use OpenCV for more advanced denoising/deskewing.
+- Confidence is only shown for models that support `predict_proba`.
