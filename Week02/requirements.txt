@@ -1,5 +1,8 @@
 streamlit
-PyMuPDF
-Pillow
-numpy
+pymupdf
 easyocr
+pillow
+numpy
+scikit-learn
+matplotlib
+joblib
