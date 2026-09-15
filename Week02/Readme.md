@@ -101,22 +101,19 @@ a screenshot/image resume):
   email/phone-adjacent line for the name, and bounding the skills capture
   more tightly.
 
-## Known issue on the deployed app
+## Deployment fix applied
 
-On the current Streamlit Cloud deployment, the app reports:
-`Classifier: Rule-based (fallback - no trained model found)`
+Earlier the deployed app showed `Classifier: Rule-based (fallback - no
+trained model found)` because `MODEL_DIR` used a relative path (`"models"`)
+that only resolved correctly when the app's working directory matched its
+own folder. On Streamlit Cloud, the working directory is the **repo root**,
+not the folder containing `app.py`, so the relative path pointed to the
+wrong location.
 
-This means the trained ML model files in `models/` are **not being loaded**
-on the deployed app (even though rule-based classification still worked
-correctly in the tests above). Likely causes to check:
-- The `models/*.joblib` files may not have actually been committed to
-  GitHub (empty folder, or a `.gitignore` rule excluding them).
-- The working directory on Streamlit Cloud may not match the `models/`
-  relative path used in `app.py`.
-
-**To fix:** confirm the `.joblib` files show a real file size on GitHub
-(not 0 KB), and that they sit in a `models/` folder in the same directory
-as `app.py`, then reboot the app.
+**Fix:** `MODEL_DIR` is now built from the script's own file location
+(`os.path.dirname(os.path.abspath(__file__))`), so it resolves correctly
+regardless of the working directory. After redeploying, the app correctly
+shows `Classifier: ML model (LogisticRegression)` with a confidence score.
 
 ## Known limitations / next steps
 
