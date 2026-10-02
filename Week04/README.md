@@ -1,5 +1,9 @@
 # Week 5 - Advanced Document Workflow & Automation
 
+**Project:** AI Document Intelligence & Workflow Platform - Zyroo AI/ML Internship
+
+**Live app:** https://zyro-aiml-internship-wrh2leervgnfzahfn4ybui.streamlit.app/
+
 Upgrade of the Week 4 app: documents now move through a controlled, auditable workflow.
 
 ```
@@ -17,6 +21,7 @@ Upload -> Process -> Classify -> Extract -> Validate -> Apply Rules
 | `audit.py` | Audit log: document ID, action, previous/new status, timestamp, reason |
 | `database.py` | SQLite layer (+ workflow columns, `audit_log` table, metrics) |
 | `test_workflow.py` | Automated tests (17) |
+| `screenshots/` | Testing evidence (see "Testing evidence" below) |
 
 ## Workflow states
 `New -> Processing -> Needs Review | Completed | Failed`,
@@ -33,23 +38,50 @@ Otherwise the document is **auto-completed**.
 Just run the app. `init_db()` adds the new columns/table and resets old Week 4 statuses to `New`
 (logged in the audit log as "Migrated from Week 4"). Then use **Batch Processing** to run them through the workflow.
 
-## Run
+## Run locally
 ```
 pip install -r requirements.txt
 streamlit run app.py
 python -m unittest -v test_workflow
 ```
 
-## Testing log (fill in with your own screenshots)
-| # | Case | Expected | Result |
-|---|---|---|---|
-| 1 | Normal invoice | Completed | |
-| 2 | Normal resume | Completed | |
-| 3 | Resume without email | Needs Review | |
-| 4 | Invoice with invalid date / amount | Needs Review (fields named) | |
-| 5 | Scanned / unreadable document | Failed or Needs Review | |
-| 6 | Duplicate upload | Blocked + audit event | |
-| 7 | Unrecognised document | Needs Review | |
-| 8 | Reject without reason | Blocked | |
-| 9 | Approve / Reject | Status + audit updated | |
-| 10 | Mixed batch | One result per doc, batch continues | |
+## Testing evidence
+All screenshots are in the [`screenshots/`](screenshots/) folder, taken on the live app
+(https://zyro-aiml-internship-wrh2leervgnfzahfn4ybui.streamlit.app/).
+
+```
+screenshots/
+  01_normal_invoice.png
+  02_normal_resume.png
+  03_missing_email.png
+  04_invalid_date_amount.png
+  05_scanned_document.png
+  06_duplicate_upload.png
+  07_unrecognised_document.png
+  08_reject_without_reason.png
+  09_approve_reject_audit.png
+  10_mixed_batch.png
+  11_search_filters.png
+  12_metrics_dashboard.png
+  13_audit_history.png
+  14_unit_tests_passing.png
+```
+
+| # | Test case | Expected | Result | Screenshot |
+|---|---|---|---|---|
+| 1 | Normal invoice | Completed automatically | | [01](screenshots/01_normal_invoice.png) |
+| 2 | Normal resume | Completed automatically | | [02](screenshots/02_normal_resume.png) |
+| 3 | Resume without email | Needs Review, "Email" named | | [03](screenshots/03_missing_email.png) |
+| 4 | Invoice with invalid date / amount | Needs Review, failed fields named | | [04](screenshots/04_invalid_date_amount.png) |
+| 5 | Scanned / unreadable document | Failed or Needs Review | | [05](screenshots/05_scanned_document.png) |
+| 6 | Duplicate upload | Blocked + audit event | | [06](screenshots/06_duplicate_upload.png) |
+| 7 | Unrecognised document | Needs Review | | [07](screenshots/07_unrecognised_document.png) |
+| 8 | Reject without a reason | Blocked, status unchanged | | [08](screenshots/08_reject_without_reason.png) |
+| 9 | Approve / Reject in review queue | Status + audit history updated | | [09](screenshots/09_approve_reject_audit.png) |
+| 10 | Mixed-success batch | One result per document, batch continues | | [10](screenshots/10_mixed_batch.png) |
+| 11 | Workflow search & filters | Filters work, latest action + time shown | | [11](screenshots/11_search_filters.png) |
+| 12 | Metrics dashboard | Counts match the documents | | [12](screenshots/12_metrics_dashboard.png) |
+| 13 | Audit history of one document | Full trail visible | | [13](screenshots/13_audit_history.png) |
+| 14 | Automated tests (`python -m unittest -v test_workflow`) | 17 tests OK (covers invalid transitions, DB/storage failure) | | [14](screenshots/14_unit_tests_passing.png) |
+
+Fill the **Result** column with Pass / Fail after testing on the live app.
