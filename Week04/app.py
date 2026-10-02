@@ -1,304 +1,36 @@
 """
-AI Document Intelligence & Workflow Platform - Week 4
+AI Document Intelligence & Workflow Platform - Week 5
 Zyroo Internship Program
 
-New in Week 4: organized file storage, SQLite metadata repository,
-duplicate detection via SHA-256 hash, multi-field search, filters/sorting,
-a document detail view, processing status, and safer error handling.
+New in Week 5: workflow states + audit log, validation, rule-based workflow
+engine, human review queue, batch processing, workflow search/filters and a
+metrics dashboard.
 
-Flow: Upload -> Validate -> Hash -> Read/OCR -> Clean -> Classify -> Extract
-      -> Store File -> Store Metadata -> Search/Filter -> View
+This file contains UI code only. The logic lives in:
+  pipeline.py (read/classify/extract/store/batch), workflow.py (states + rules),
+  validator.py (field validation), audit.py (history), database.py (SQLite).
 """
 
 import os
-import re
-import io
-import uuid
-import hashlib
-from datetime import datetime
+import json
 
-import numpy as np
+import pandas as pd
 import streamlit as st
-import pymupdf as fitz  # PyMuPDF
-from PIL import Image
-import easyocr
 
+import audit
 import database as db
-
-# ----------------------------------------------------------------------
-# CONFIG
-# ----------------------------------------------------------------------
-
-ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png"}
-MAX_FILE_SIZE_MB = 10
-STORAGE_ROOT = "storage"
-FOLDERS = {
-    "Invoice": os.path.join(STORAGE_ROOT, "invoices"),
-    "Resume": os.path.join(STORAGE_ROOT, "resumes"),
-    "Other": os.path.join(STORAGE_ROOT, "others"),
-}
-
-for folder in FOLDERS.values():
-    os.makedirs(folder, exist_ok=True)
+import pipeline
+import workflow
 
 db.init_db()
+pipeline.ensure_folders()
 
+st.set_page_config(page_title="AI Document Intelligence - Week 5", page_icon="📁", layout="wide")
 
-@st.cache_resource
-def get_ocr_reader():
-    return easyocr.Reader(["en"], gpu=False)
-
-
-# ----------------------------------------------------------------------
-# STEP: VALIDATE
-# ----------------------------------------------------------------------
-
-def validate_file(uploaded_file) -> str:
-    """Returns an error message string, or '' if the file is valid."""
-    ext = uploaded_file.name.split(".")[-1].lower()
-    if ext not in ALLOWED_EXTENSIONS:
-        return f"Unsupported file type: .{ext}. Allowed: PDF, JPG, JPEG, PNG."
-
-    size_mb = len(uploaded_file.getvalue()) / (1024 * 1024)
-    if size_mb > MAX_FILE_SIZE_MB:
-        return f"File is too large ({size_mb:.1f} MB). Max allowed is {MAX_FILE_SIZE_MB} MB."
-
-    return ""
-
-
-# ----------------------------------------------------------------------
-# STEP: HASH (duplicate detection)
-# ----------------------------------------------------------------------
-
-def compute_file_hash(file_bytes: bytes) -> str:
-    return hashlib.sha256(file_bytes).hexdigest()
-
-
-# ----------------------------------------------------------------------
-# STEP: READ TEXT (PDF / OCR)
-# ----------------------------------------------------------------------
-
-def extract_text_from_pdf(file_bytes: bytes) -> str:
-    text = ""
-    with fitz.open(stream=file_bytes, filetype="pdf") as doc:
-        for page in doc:
-            text += page.get_text()
-    return text.strip()
-
-
-def extract_text_with_ocr_from_pdf(file_bytes: bytes) -> str:
-    reader = get_ocr_reader()
-    text = ""
-    with fitz.open(stream=file_bytes, filetype="pdf") as doc:
-        for page in doc:
-            pix = page.get_pixmap(dpi=200)
-            img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
-            result = reader.readtext(np.array(img), detail=0)
-            text += " ".join(result) + "\n"
-    return text.strip()
-
-
-def extract_text_from_image(file_bytes: bytes) -> str:
-    reader = get_ocr_reader()
-    img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-    result = reader.readtext(np.array(img), detail=0)
-    return " ".join(result).strip()
-
-
-def read_document_text(file_bytes: bytes, ext: str) -> tuple[str, str]:
-    """Returns (text, method_used). Never raises - returns ('', 'Failed: ...') on error."""
-    try:
-        if ext == "pdf":
-            text = extract_text_from_pdf(file_bytes)
-            if len(text) > 20:
-                return text, "PyMuPDF (text layer)"
-            text = extract_text_with_ocr_from_pdf(file_bytes)
-            return text, "OCR (scanned PDF)"
-        else:
-            text = extract_text_from_image(file_bytes)
-            return text, "OCR (image)"
-    except Exception as e:
-        return "", f"Failed: {e}"
-
-
-# ----------------------------------------------------------------------
-# STEP: CLEAN TEXT
-# ----------------------------------------------------------------------
-
-def clean_text(raw_text: str) -> str:
-    if not raw_text:
-        return ""
-    text = raw_text.replace("\r", "\n")
-    text = re.sub(r"[ \t]+", " ", text)          # collapse repeated spaces/tabs
-    text = re.sub(r"\n\s*\n+", "\n", text)        # collapse repeated blank lines
-    text = "\n".join(line.strip() for line in text.split("\n"))
-    return text.strip()
-
-
-# ----------------------------------------------------------------------
-# STEP: CLASSIFY (rule-based)
-# ----------------------------------------------------------------------
-
-def detect_document_type(text: str) -> str:
-    lower_text = text.lower()
-    invoice_keywords = ["invoice", "total", "invoice number", "bill to", "amount due"]
-    resume_keywords = ["resume", "skills", "education", "experience", "curriculum vitae"]
-
-    invoice_score = sum(1 for kw in invoice_keywords if kw in lower_text)
-    resume_score = sum(1 for kw in resume_keywords if kw in lower_text)
-
-    if invoice_score == 0 and resume_score == 0:
-        return "Other"
-    return "Invoice" if invoice_score >= resume_score else "Resume"
-
-
-# ----------------------------------------------------------------------
-# STEP: EXTRACT FIELDS (regex-based)
-# ----------------------------------------------------------------------
-
-def extract_invoice_fields(text: str) -> dict:
-    fields = {}
-
-    invoice_no = re.search(r"(invoice\s*(no|number|#)?\s*[:\-]?\s*)([A-Za-z0-9\-\/]+)",
-                            text, re.IGNORECASE)
-    fields["Invoice Number"] = invoice_no.group(3) if invoice_no else "Not Found"
-
-    date = re.search(r"\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})\b", text)
-    fields["Date"] = date.group(1) if date else "Not Found"
-
-    total = re.search(
-        r"(total|amount due|grand total)\s*[:\-]?\s*"
-        r"([A-Za-z]{0,4}\s?[\$\€\£]?\s?[\d,]+\.?\d{0,2})",
-        text, re.IGNORECASE
-    )
-    fields["Total Amount"] = total.group(2).strip() if total else "Not Found"
-
-    company = re.search(r"(company|from|billed by)\s*[:\-]?\s*([A-Za-z0-9 &.,\-]+)",
-                         text, re.IGNORECASE)
-    fields["Company Name"] = company.group(2).strip() if company else "Not Found"
-
-    return fields
-
-
-def extract_resume_fields(text: str) -> dict:
-    fields = {}
-
-    email = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", text)
-    fields["Email"] = email.group(0) if email else "Not Found"
-
-    phone = re.search(r"(\+?\d{1,3}[-.\s]?)?\(?\d{3,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}", text)
-    fields["Phone"] = phone.group(0) if phone else "Not Found"
-
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    fields["Name"] = lines[0] if lines else "Not Found"
-
-    skills_match = re.search(r"skills\s*[:\-]?\s*(.+)", text, re.IGNORECASE)
-    fields["Skills"] = skills_match.group(1).strip()[:200] if skills_match else "Not Found"
-
-    return fields
-
-
-def extract_fields(text: str, doc_type: str) -> dict:
-    if doc_type == "Invoice":
-        return extract_invoice_fields(text)
-    elif doc_type == "Resume":
-        return extract_resume_fields(text)
-    return {}
-
-
-# ----------------------------------------------------------------------
-# STEP: STORE FILE
-# ----------------------------------------------------------------------
-
-def store_file(file_bytes: bytes, original_filename: str, doc_type: str) -> tuple[str, str]:
-    """Saves the file into the right folder with a safe generated name.
-    Returns (stored_filename, file_path)."""
-    ext = original_filename.split(".")[-1].lower()
-    stored_filename = f"{uuid.uuid4().hex}.{ext}"
-    folder = FOLDERS.get(doc_type, FOLDERS["Other"])
-    file_path = os.path.join(folder, stored_filename)
-    with open(file_path, "wb") as f:
-        f.write(file_bytes)
-    return stored_filename, file_path
-
-
-# ----------------------------------------------------------------------
-# PIPELINE: process one uploaded file end-to-end
-# ----------------------------------------------------------------------
-
-def process_and_store(uploaded_file):
-    """Runs the full pipeline for one file. Returns a dict result for display."""
-    file_bytes = uploaded_file.getvalue()
-    original_filename = uploaded_file.name
-    ext = original_filename.split(".")[-1].lower()
-
-    # 1. Validate
-    error = validate_file(uploaded_file)
-    if error:
-        return {"ok": False, "message": error}
-
-    # 2. Hash + duplicate check
-    file_hash = compute_file_hash(file_bytes)
-    existing = db.get_document_by_hash(file_hash)
-    if existing:
-        return {"ok": True, "duplicate": True, "record": existing}
-
-    # 3. Read text (PDF / OCR) - never crashes, returns Failed status instead
-    raw_text, method = read_document_text(file_bytes, ext)
-    if raw_text == "":
-        status = "Failed"
-        cleaned_text = ""
-        doc_type = "Other"
-        fields = {}
-    else:
-        # 4. Clean text
-        cleaned_text = clean_text(raw_text)
-
-        # 5. Classify
-        doc_type = detect_document_type(cleaned_text)
-
-        # 6. Extract fields
-        fields = extract_fields(cleaned_text, doc_type)
-
-        # 7. Decide status
-        important_missing = any(v == "Not Found" for v in fields.values()) if fields else False
-        status = "Needs Review" if important_missing else "Processed"
-
-    # 8. Store file
-    try:
-        stored_filename, file_path = store_file(file_bytes, original_filename, doc_type)
-    except Exception as e:
-        return {"ok": False, "message": f"Could not save file: {e}"}
-
-    # 9. Store metadata in the database
-    record = {
-        "original_filename": original_filename,
-        "stored_filename": stored_filename,
-        "document_type": doc_type,
-        "upload_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "company": fields.get("Company Name", ""),
-        "invoice_number": fields.get("Invoice Number", ""),
-        "total_amount": fields.get("Total Amount", ""),
-        "file_path": file_path,
-        "text_preview": cleaned_text[:300],
-        "file_hash": file_hash,
-        "status": status,
-    }
-
-    try:
-        new_id = db.insert_document(record)
-    except Exception as e:
-        return {"ok": False, "message": f"Database error: could not save record ({e})"}
-
-    record["id"] = new_id
-    return {
-        "ok": True,
-        "duplicate": False,
-        "record": record,
-        "fields": fields,
-        "extraction_method": method,
-        "full_text": cleaned_text,
-    }
+STATUS_ICONS = {
+    "New": "⚪", "Processing": "🔵", "Needs Review": "🟡", "Approved": "🟢",
+    "Rejected": "🟠", "Completed": "✅", "Failed": "🔴",
+}
 
 
 # ----------------------------------------------------------------------
@@ -306,29 +38,75 @@ def process_and_store(uploaded_file):
 # ----------------------------------------------------------------------
 
 def status_badge(status: str) -> str:
-    colors = {"Processed": "🟢", "Needs Review": "🟡", "Failed": "🔴"}
-    return f"{colors.get(status, '⚪')} {status}"
+    return f"{STATUS_ICONS.get(status, '⚪')} {status}"
 
 
-def show_document_detail(doc: dict, key_prefix: str = "detail"):
-    """key_prefix must be unique per call site so widget keys never clash
-    (e.g. the same document can appear in both the Upload tab and the
-    Search & Browse tab within the same run)."""
+def flash(kind: str, message: str):
+    """Show a message after st.rerun() (normal messages vanish on rerun)."""
+    st.session_state["flash"] = (kind, message)
+
+
+def show_flash():
+    item = st.session_state.pop("flash", None)
+    if item:
+        getattr(st, item[0])(item[1])
+
+
+def fields_table(doc: dict):
+    fields = json.loads(doc.get("fields_json") or "{}")
+    results = json.loads(doc.get("validation_json") or "{}").get("results", {})
+    if not fields:
+        st.caption("No extracted fields stored yet (run the workflow for this document).")
+        return
+    icon = lambda r: ("✅ " if r == "OK" else "⚠️ " if r.startswith(("Warning", "Not provided"))
+                      else "❌ " if r else "") + r
+    rows = [{"Field": k, "Extracted value": str(v), "Validation": icon(results.get(k, ""))}
+            for k, v in fields.items()]
+    st.dataframe(pd.DataFrame(rows), hide_index=True)
+
+
+def history_table(doc_id: int):
+    history = audit.get_history(doc_id)
+    if not history:
+        st.caption("No history recorded.")
+        return
+    st.dataframe(pd.DataFrame(history)[
+        ["timestamp", "action", "previous_status", "new_status", "reason"]
+    ].rename(columns={"previous_status": "from", "new_status": "to"}),
+        hide_index=True)
+
+
+def show_document_detail(doc: dict, key_prefix: str):
+    """key_prefix must be unique per call site so widget keys never clash.
+    (No st.expander in here - this is shown inside expanders and they can't nest.)"""
     st.subheader(f"📄 {doc['original_filename']}")
     st.write(status_badge(doc["status"]))
+    if doc.get("review_reason"):
+        st.info(f"**Reason:** {doc['review_reason']}")
 
     col1, col2 = st.columns(2)
     with col1:
         st.write(f"**Document Type:** {doc['document_type']}")
+        conf = doc.get("confidence")
+        st.write("**Classifier confidence:** " +
+                 (f"{conf:.2f}" if conf is not None else "not provided by classifier"))
         st.write(f"**Upload Date:** {doc['upload_date']}")
         st.write(f"**Company:** {doc['company'] or 'Not Found'}")
     with col2:
         st.write(f"**Invoice Number:** {doc['invoice_number'] or 'Not Found'}")
         st.write(f"**Total Amount:** {doc['total_amount'] or 'Not Found'}")
         st.write(f"**File Path:** `{doc['file_path']}`")
+        if doc.get("last_action"):
+            st.write(f"**Latest action:** {doc['last_action']} ({doc['last_action_time']})")
+
+    st.write("**Extracted fields & validation:**")
+    fields_table(doc)
 
     st.write("**Text Preview:**")
     st.text(doc["text_preview"] or "(no preview available)")
+
+    st.write("**Workflow history:**")
+    history_table(doc["id"])
 
     if doc["file_path"] and os.path.exists(doc["file_path"]):
         with open(doc["file_path"], "rb") as f:
@@ -342,91 +120,205 @@ def show_document_detail(doc: dict, key_prefix: str = "detail"):
         st.warning("Stored file not found on disk.")
 
 
-# ----------------------------------------------------------------------
-# STREAMLIT APP
-# ----------------------------------------------------------------------
+def reset_filters():
+    st.session_state["f_keyword"] = ""
+    st.session_state["f_type"] = "All"
+    st.session_state["f_status"] = "All"
+    st.session_state["f_sort"] = "Newest"
 
-st.set_page_config(page_title="AI Document Intelligence - Week 4", page_icon="📁", layout="wide")
+
+# ----------------------------------------------------------------------
+# PAGE
+# ----------------------------------------------------------------------
 
 st.title(" AI Document Intelligence & Workflow Platform")
-st.caption("Zyroo Internship Program • Week 4 • Document Management Layer")
+st.caption("Zyroo Internship Program • Week 5 • Advanced Document Workflow & Automation")
+show_flash()
 
-tab_upload, tab_browse = st.tabs(["📤 Upload", "🔎 Search & Browse"])
+tab_upload, tab_browse, tab_review, tab_batch, tab_metrics = st.tabs(
+    ["📤 Upload", "🔎 Search & Workflow", "🧑‍⚖️ Review Queue", "⚙️ Batch Processing", "📊 Metrics"]
+)
 
 # ------------------------- UPLOAD TAB ----------------------------------
 with tab_upload:
-    st.write("Upload a PDF or image. It will be processed, classified, "
-             "and saved to the document repository.")
+    st.write("Upload a PDF or image. It is processed, validated, passed through the "
+             "workflow rules and either completed automatically or sent to human review.")
 
     uploaded_files = st.file_uploader(
-        "Upload document(s)",
-        type=list(ALLOWED_EXTENSIONS),
+        "Upload document(s)", type=list(pipeline.ALLOWED_EXTENSIONS),
         accept_multiple_files=True,
     )
 
-    if uploaded_files:
-        for uploaded_file in uploaded_files:
-            st.divider()
+    # Streamlit re-runs this script on every click. Remember what was already
+    # processed so a re-run does not re-process files or log fake "duplicates".
+    processed = st.session_state.setdefault("processed_uploads", {})
+
+    for uploaded_file in uploaded_files or []:
+        st.divider()
+        upload_key = f"{uploaded_file.name}-{pipeline.compute_file_hash(uploaded_file.getvalue())}"
+        if upload_key not in processed:
             with st.spinner(f"Processing {uploaded_file.name}..."):
-                result = process_and_store(uploaded_file)
+                processed[upload_key] = pipeline.process_upload(uploaded_file)
+        result = processed[upload_key]
 
-            if not result["ok"]:
-                st.error(f"❌ {uploaded_file.name}: {result['message']}")
-                continue
+        if not result["ok"]:
+            st.error(f"❌ {uploaded_file.name}: {result['message']}")
+            continue
 
-            if result.get("duplicate"):
-                st.warning(f"⚠️ Duplicate detected for **{uploaded_file.name}** — "
-                           f"this file was already uploaded as "
-                           f"**{result['record']['original_filename']}**.")
-                show_document_detail(result["record"], key_prefix="upload_dup")
-                continue
+        if result.get("duplicate"):
+            st.warning(f"⚠️ Duplicate detected for **{uploaded_file.name}** — already stored as "
+                       f"**{result['record']['original_filename']}**.")
+            continue
 
-            record = result["record"]
-            st.success(f"✅ {uploaded_file.name} processed and saved.")
-            st.write(f"**Document Type:** {record['document_type']}  |  "
-                     f"**Status:** {status_badge(record['status'])}")
-            st.write(f"*Extraction method: {result['extraction_method']}*")
+        record = db.get_document_by_id(result["doc_id"])
+        outcome = result["outcome"]
+        if outcome["status"] == workflow.COMPLETED:
+            st.success(f"✅ {uploaded_file.name} passed all rules and was completed automatically.")
+        elif outcome["status"] == workflow.NEEDS_REVIEW:
+            st.warning(f"🟡 {uploaded_file.name} was sent to the Review Queue: {outcome['reason']}")
+        else:
+            st.error(f"🔴 {uploaded_file.name} failed processing: {outcome['reason']}")
 
-            if result["fields"]:
-                st.write("**Extracted Fields:**")
-                for k, v in result["fields"].items():
-                    st.write(f"- **{k}:** {v}")
+        st.write(f"**Document Type:** {record['document_type']}  |  "
+                 f"**Status:** {status_badge(record['status'])}")
+        st.write(f"*Extraction method: {result['extraction_method']}*")
+        fields_table(record)
+        with st.expander("View extracted text"):
+            st.text(result["full_text"])
 
-            with st.expander("View extracted text"):
-                st.text(result["full_text"])
-
-# ------------------------- BROWSE / SEARCH TAB --------------------------
+# ------------------------- SEARCH & WORKFLOW TAB -------------------------
 with tab_browse:
-    st.write("Search, filter, and browse all saved documents.")
+    st.write("Search, filter and browse documents with their workflow status and latest action.")
 
     col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
     with col1:
-        keyword = st.text_input("Search (filename, company, invoice #, text...)")
+        keyword = st.text_input("Search (filename, type, company, invoice #...)", key="f_keyword")
     with col2:
-        doc_type_filter = st.selectbox("Document Type", ["All", "Invoice", "Resume", "Other"])
+        doc_type_filter = st.selectbox("Document Type", ["All", "Invoice", "Resume", "Other"],
+                                       key="f_type")
     with col3:
-        status_filter = st.selectbox("Status", ["All", "Processed", "Needs Review", "Failed"])
+        status_filter = st.selectbox("Workflow Status", ["All"] + workflow.STATES, key="f_status")
     with col4:
-        sort_order = st.selectbox("Sort", ["Newest", "Oldest"])
+        sort_order = st.selectbox("Sort", ["Newest", "Oldest"], key="f_sort")
 
-    if st.button("🧹 Clear Filters"):
-        st.rerun()
+    st.button("🧹 Clear Filters", on_click=reset_filters)
 
-    results = db.search_documents(
-        keyword=keyword,
-        doc_type=doc_type_filter,
-        status=status_filter,
-        sort_order=sort_order,
-    )
-
+    results = db.search_documents(keyword=keyword, doc_type=doc_type_filter,
+                                  status=status_filter, sort_order=sort_order)
     st.write(f"**{len(results)} document(s) found**")
 
     if not results:
-        st.info("No documents match your search/filters yet. Upload some documents first.")
-    else:
-        for i, doc in enumerate(results):
-            with st.expander(
-                f"{status_badge(doc['status']).split()[0]} {doc['original_filename']} "
-                f"— {doc['document_type']} — {doc['upload_date']}"
-            ):
-                show_document_detail(doc, key_prefix=f"browse_{i}")
+        st.info("No documents match your search/filters.")
+    for doc in results:
+        with st.expander(
+            f"{STATUS_ICONS.get(doc['status'], '⚪')} {doc['original_filename']} — "
+            f"{doc['document_type']} — {doc['status']} — "
+            f"{doc['last_action'] or 'no action'} ({doc['last_action_time'] or '-'})"
+        ):
+            show_document_detail(doc, key_prefix=f"browse_{doc['id']}")
+
+# ------------------------- REVIEW QUEUE TAB -----------------------------
+with tab_review:
+    st.write("Documents with missing, invalid or uncertain information wait here for a human decision.")
+    queue = db.search_documents(status=workflow.NEEDS_REVIEW, sort_order="Oldest")
+    st.write(f"**{len(queue)} document(s) waiting for review**")
+
+    if not queue:
+        st.success("The review queue is empty.")
+
+    for i, doc in enumerate(queue):
+        with st.expander(f"{doc['original_filename']} — {doc['document_type']} — "
+                         f"{doc['review_reason'] or 'needs review'}", expanded=(i == 0)):
+            st.write(f"**Filename:** {doc['original_filename']}")
+            st.write(f"**Document type:** {doc['document_type']}   |   "
+                     f"**Status:** {status_badge(doc['status'])}")
+            st.warning(f"**Review reason:** {doc['review_reason'] or 'Not recorded'}")
+            fields_table(doc)
+            st.text(doc["text_preview"] or "(no preview available)")
+
+            note = st.text_input("Reviewer note (required when rejecting)",
+                                 key=f"review_note_{doc['id']}")
+            approve_col, reject_col = st.columns(2)
+
+            if approve_col.button("✅ Approve", key=f"approve_{doc['id']}"):
+                try:
+                    workflow.approve_document(doc["id"], note)
+                    flash("success", f"{doc['original_filename']} approved and completed.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not approve: {e}")
+
+            if reject_col.button("❌ Reject", key=f"reject_{doc['id']}"):
+                if not note.strip():
+                    st.error("Please enter a short reason before rejecting.")
+                else:
+                    try:
+                        workflow.reject_document(doc["id"], note)
+                        flash("success", f"{doc['original_filename']} rejected.")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Could not reject: {e}")
+
+# ------------------------- BATCH TAB ------------------------------------
+with tab_batch:
+    st.write("Select stored documents and run the same workflow rules for each of them. "
+             "Only **New**, **Needs Review** and **Failed** documents can be (re)run.")
+
+    all_docs = db.get_all_documents()
+    options = {f"#{d['id']} — {d['original_filename']} — {d['status']}": d["id"] for d in all_docs}
+    runnable = [label for label, doc_id in options.items()
+                if next(d for d in all_docs if d["id"] == doc_id)["status"]
+                in workflow.RUNNABLE_STATES]
+
+    select_all = st.checkbox(f"Select all runnable documents ({len(runnable)})")
+    selected = st.multiselect("Documents", list(options),
+                              default=runnable if select_all else [])
+
+    if st.button("▶️ Run workflow on selected", disabled=not selected):
+        bar = st.progress(0.0)
+        st.session_state["batch"] = pipeline.run_batch(
+            [options[label] for label in selected], progress=bar.progress)
+        bar.empty()
+
+    batch = st.session_state.get("batch")
+    if batch:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Processed (auto-completed)", batch["processed"])
+        c2.metric("Sent to review", batch["review"])
+        c3.metric("Failed", batch["failed"])
+        c4.metric("Skipped", batch["skipped"])
+        st.dataframe(pd.DataFrame(batch["results"]).rename(columns={
+            "id": "ID", "filename": "File", "outcome": "Result", "reason": "Reason"}),
+            hide_index=True)
+
+# ------------------------- METRICS TAB ----------------------------------
+with tab_metrics:
+    m = db.get_metrics()
+    by_status = m["by_status"]
+    handled = sum(by_status.get(s, 0) for s in
+                  (workflow.NEEDS_REVIEW, workflow.APPROVED, workflow.REJECTED, workflow.COMPLETED))
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total documents", m["total"])
+    c2.metric("Processed", handled, help="Documents that went through the workflow "
+              "successfully (Needs Review, Approved, Rejected or Completed).")
+    c3.metric("Needing review", by_status.get(workflow.NEEDS_REVIEW, 0))
+    c4.metric("Failed", by_status.get(workflow.FAILED, 0))
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Approved", by_status.get(workflow.APPROVED, 0))
+    c6.metric("Rejected", by_status.get(workflow.REJECTED, 0))
+    c7.metric("Completed", by_status.get(workflow.COMPLETED, 0))
+    c8.metric("Avg processing time",
+              f"{m['avg_processing_seconds']:.2f}s" if m["avg_processing_seconds"] is not None else "n/a",
+              help="Measured around read + classify + extract. n/a until a document is processed.")
+
+    left, right = st.columns(2)
+    with left:
+        st.write("**Documents by type**")
+        if m["by_type"]:
+            st.bar_chart(pd.Series(m["by_type"], name="documents"))
+    with right:
+        st.write("**Documents by status**")
+        if by_status:
+            st.bar_chart(pd.Series(by_status, name="documents"))
