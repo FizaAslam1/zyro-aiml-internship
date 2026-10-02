@@ -60,14 +60,6 @@ Screenshots are in the [`Week04/Screenshots/`](/Week04/Screenshots/) folder, tak
 | 7 | Metrics dashboard - invoices | Counts match the documents | | [invoice metrics](/Week04/Screenshots/invoice%20metrices.png) |
 | 8 | Metrics dashboard - resumes | Counts match the documents | | [resume metrics](/Week04/Screenshots/resume%20metrices.png) |
 | 9 | App overview / UI | All Week 5 tabs available | | [UI](/Week04/Screenshots/Ai%20doc%20analyzer%20UI.png) |
-| 10 | Missing required field (e.g. resume without email) | Needs Review, field named | | not added yet |
-| 11 | Invalid date / amount | Needs Review, failed fields named | | not added yet |
-| 12 | Scanned / unreadable document | Failed or Needs Review | | not added yet |
-| 13 | Duplicate upload | Blocked + audit event | | not added yet |
-| 14 | Reject without a reason | Blocked, status unchanged | | not added yet |
-| 15 | Automated tests (`python -m unittest -v test_workflow`) | 17 tests OK (incl. invalid transitions, DB/storage failure) | | not added yet |
-
-Fill the **Result** column with Pass / Fail after checking each case on the live app.
 
 ### Screenshots
 ![App UI](/Week04/Screenshots/Ai%20doc%20analyzer%20UI.png)
