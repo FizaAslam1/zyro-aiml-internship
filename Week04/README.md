@@ -21,7 +21,7 @@ Upload -> Process -> Classify -> Extract -> Validate -> Apply Rules
 | `audit.py` | Audit log: document ID, action, previous/new status, timestamp, reason |
 | `database.py` | SQLite layer (+ workflow columns, `audit_log` table, metrics) |
 | `test_workflow.py` | Automated tests (17) |
-| `screenshots/` | Testing evidence (see "Testing evidence" below) |
+| `Week04/Screenshots/` | Testing evidence screenshots (see "Testing evidence" below) |
 
 ## Workflow states
 `New -> Processing -> Needs Review | Completed | Failed`,
@@ -46,42 +46,37 @@ python -m unittest -v test_workflow
 ```
 
 ## Testing evidence
-All screenshots are in the [`screenshots/`](screenshots/) folder, taken on the live app
+Screenshots are in the [`Week04/Screenshots/`](/Week04/Screenshots/) folder, taken on the live app
 (https://zyro-aiml-internship-wrh2leervgnfzahfn4ybui.streamlit.app/).
-
-```
-screenshots/
-  01_normal_invoice.png
-  02_normal_resume.png
-  03_missing_email.png
-  04_invalid_date_amount.png
-  05_scanned_document.png
-  06_duplicate_upload.png
-  07_unrecognised_document.png
-  08_reject_without_reason.png
-  09_approve_reject_audit.png
-  10_mixed_batch.png
-  11_search_filters.png
-  12_metrics_dashboard.png
-  13_audit_history.png
-  14_unit_tests_passing.png
-```
 
 | # | Test case | Expected | Result | Screenshot |
 |---|---|---|---|---|
-| 1 | Normal invoice | Completed automatically | | [01](screenshots/01_normal_invoice.png) |
-| 2 | Normal resume | Completed automatically | | [02](screenshots/02_normal_resume.png) |
-| 3 | Resume without email | Needs Review, "Email" named | | [03](screenshots/03_missing_email.png) |
-| 4 | Invoice with invalid date / amount | Needs Review, failed fields named | | [04](screenshots/04_invalid_date_amount.png) |
-| 5 | Scanned / unreadable document | Failed or Needs Review | | [05](screenshots/05_scanned_document.png) |
-| 6 | Duplicate upload | Blocked + audit event | | [06](screenshots/06_duplicate_upload.png) |
-| 7 | Unrecognised document | Needs Review | | [07](screenshots/07_unrecognised_document.png) |
-| 8 | Reject without a reason | Blocked, status unchanged | | [08](screenshots/08_reject_without_reason.png) |
-| 9 | Approve / Reject in review queue | Status + audit history updated | | [09](screenshots/09_approve_reject_audit.png) |
-| 10 | Mixed-success batch | One result per document, batch continues | | [10](screenshots/10_mixed_batch.png) |
-| 11 | Workflow search & filters | Filters work, latest action + time shown | | [11](screenshots/11_search_filters.png) |
-| 12 | Metrics dashboard | Counts match the documents | | [12](screenshots/12_metrics_dashboard.png) |
-| 13 | Audit history of one document | Full trail visible | | [13](screenshots/13_audit_history.png) |
-| 14 | Automated tests (`python -m unittest -v test_workflow`) | 17 tests OK (covers invalid transitions, DB/storage failure) | | [14](screenshots/14_unit_tests_passing.png) |
+| 1 | Normal invoice processed through the workflow | Rules applied, status + audit history shown | | [invoice processing](/Week04/Screenshots/invoice%20processing.png), [invoice workflow](/Week04/Screenshots/invoice%20workflow.png) |
+| 2 | Normal resume analysed | Fields extracted and validated | | [resume analyze](/Week04/Screenshots/resume%20analyze.png) |
+| 3 | Human review queue (Approve / Reject) | Status + audit history updated | | [invoice review](/Week04/Screenshots/invoice%20review.png) |
+| 4 | Batch processing - invoices | One result per document, batch continues | | [invoice batch](/Week04/Screenshots/invoice%20batch%20normalization.png) |
+| 5 | Batch processing - resumes | One result per document, batch continues | | [resume batch](/Week04/Screenshots/resume%20batch%20processing.png) |
+| 6 | Workflow search & filters | Filters work, latest action + time shown | | [search for resume](/Week04/Screenshots/search%20for%20resume.png) |
+| 7 | Metrics dashboard - invoices | Counts match the documents | | [invoice metrics](/Week04/Screenshots/invoice%20metrices.png) |
+| 8 | Metrics dashboard - resumes | Counts match the documents | | [resume metrics](/Week04/Screenshots/resume%20metrices.png) |
+| 9 | App overview / UI | All Week 5 tabs available | | [UI](/Week04/Screenshots/Ai%20doc%20analyzer%20UI.png) |
+| 10 | Missing required field (e.g. resume without email) | Needs Review, field named | | not added yet |
+| 11 | Invalid date / amount | Needs Review, failed fields named | | not added yet |
+| 12 | Scanned / unreadable document | Failed or Needs Review | | not added yet |
+| 13 | Duplicate upload | Blocked + audit event | | not added yet |
+| 14 | Reject without a reason | Blocked, status unchanged | | not added yet |
+| 15 | Automated tests (`python -m unittest -v test_workflow`) | 17 tests OK (incl. invalid transitions, DB/storage failure) | | not added yet |
 
-Fill the **Result** column with Pass / Fail after testing on the live app.
+Fill the **Result** column with Pass / Fail after checking each case on the live app.
+
+### Screenshots
+![App UI](/Week04/Screenshots/Ai%20doc%20analyzer%20UI.png)
+![Invoice processing](/Week04/Screenshots/invoice%20processing.png)
+![Invoice workflow](/Week04/Screenshots/invoice%20workflow.png)
+![Invoice review queue](/Week04/Screenshots/invoice%20review.png)
+![Invoice batch processing](/Week04/Screenshots/invoice%20batch%20normalization.png)
+![Invoice metrics](/Week04/Screenshots/invoice%20metrices.png)
+![Resume analysis](/Week04/Screenshots/resume%20analyze.png)
+![Resume batch processing](/Week04/Screenshots/resume%20batch%20processing.png)
+![Resume metrics](/Week04/Screenshots/resume%20metrices.png)
+![Search for resume](/Week04/Screenshots/search%20for%20resume.png)
