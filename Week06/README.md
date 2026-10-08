@@ -3,7 +3,6 @@
 An end-to-end document processing platform built with Streamlit.  
 Upload a PDF or image — the app extracts text (with OCR fallback for scanned documents), classifies the document, extracts structured fields, validates them, checks for anomalies, routes through a workflow engine, and supports human review, approval, rejection, and AI-assisted querying.
 
-🚀 **Live Demo:** [Open on Streamlit Cloud](https://ai-document-intelligence-workflow-platform-pmmcfn6ruedfri5gpp9.streamlit.app)
 
 ---
 
